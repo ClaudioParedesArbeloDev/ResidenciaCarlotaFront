@@ -10,10 +10,16 @@ class Role {
   });
 
   factory Role.fromJson(Map<String, dynamic> json) => Role(
-        id: json['id'] as int,
+        id: _parseInt(json['id']),
         name: json['name'] as String,
         displayName: (json['display_name'] as String?) ?? json['name'] as String,
       );
+
+  static int _parseInt(dynamic v) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.parse(v.toString());
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,

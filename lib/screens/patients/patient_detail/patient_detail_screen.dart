@@ -3,6 +3,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:app_geriatrico/core/app_colors.dart';
+import 'package:app_geriatrico/core/date_utils.dart';
 import 'package:app_geriatrico/core/config.dart';
 import 'package:app_geriatrico/data/models/bed_model.dart';
 import 'package:app_geriatrico/data/models/employee_model.dart';
@@ -28,15 +29,23 @@ import 'package:app_geriatrico/data/models/cie10_model.dart';
 import 'package:app_geriatrico/data/repositories/cie10_repository.dart';
 import 'package:app_geriatrico/data/models/allergy_model.dart';
 import 'package:app_geriatrico/data/repositories/allergy_repository.dart';
+import 'package:app_geriatrico/screens/patients/patient_detail/shared/patient_labels.dart';
+import 'package:app_geriatrico/screens/patients/patient_detail/shared/patient_form_fields.dart';
+import 'package:app_geriatrico/screens/patients/patient_detail/tabs/personal_tab.dart';
+import 'package:app_geriatrico/screens/patients/patient_detail/tabs/contact_tab.dart';
+import 'package:app_geriatrico/screens/patients/patient_detail/tabs/clinical_tab.dart';
+
 
 class PatientDetailScreen extends StatefulWidget {
   final Patient patient;
   final String token;
+  final int institutionId;
 
   const PatientDetailScreen({
     super.key,
     required this.patient,
     required this.token,
+    required this.institutionId,
   });
 
   @override
@@ -133,7 +142,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
       }
     });
 
-    _api = ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token);
+    _api = ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token, institutionId: widget.institutionId);
     _patientRepo      = PatientRepository(_api);
     _contactRepo      = PatientContactRepository(_api);
     _diagnosisRepo    = PatientDiagnosisRepository(_api);
@@ -154,8 +163,8 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
     _firstName     = TextEditingController(text: _patient.firstName);
     _lastName      = TextEditingController(text: _patient.lastName);
     _dni           = TextEditingController(text: _patient.dni);
-    _birthDate     = TextEditingController(text: _patient.birthDate ?? '');
-    _admissionDate = TextEditingController(text: _patient.admissionDate ?? '');
+    _birthDate     = TextEditingController(text: AppDateUtils.format(_patient.birthDate));
+    _admissionDate = TextEditingController(text: AppDateUtils.format(_patient.admissionDate));
     _emergencyPhone= TextEditingController(text: _patient.emergencyPhone ?? '');
     _notes         = TextEditingController(text: _patient.notes ?? '');
     _gender           = _patient.gender;
@@ -175,6 +184,16 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
     super.dispose();
   }
 
+
+
+  static String _formatDate(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return '';
+    try {
+      final parts = dateStr.split('T')[0].split('-');
+      if (parts.length == 3) return '${parts[2]}/${parts[1]}/${parts[0]}';
+    } catch (_) {}
+    return dateStr;
+  }
 
   Future<void> _loadCurrentUser() async {
     try {
@@ -413,10 +432,10 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         firstName:      _firstName.text.trim(),
         lastName:       _lastName.text.trim(),
         dni:            _dni.text.trim(),
-        birthDate:      _birthDate.text.isEmpty ? null : _birthDate.text,
+        birthDate:      AppDateUtils.toIso(_birthDate.text),
         gender:         _gender,
         bloodType:      _bloodType.isEmpty ? null : _bloodType,
-        admissionDate:  _admissionDate.text.isEmpty ? null : _admissionDate.text,
+        admissionDate:  AppDateUtils.toIso(_admissionDate.text),
         mobilityStatus: _mobilityStatus,
         dependencyLevel:_dependencyLevel,
         emergencyPhone: _emergencyPhone.text.trim().isEmpty ? null : _emergencyPhone.text.trim(),
@@ -526,8 +545,6 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                                 await _contactRepo.create(data);
                               }
                               if (mounted) {
-                                // ignore: duplicate_ignore
-                                // ignore: use_build_context_synchronously
                                 Navigator.pop(ctx);
                                 await _loadContacts();
                                 _showSnack(isEdit ? 'Familiar actualizado' : 'Familiar agregado', success: true);
@@ -553,15 +570,13 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                       key: formKey,
                       child: Column(
                         children: [
-                          _sheetRow('Nombre *', name, required: true),
-                          _sheetRow('Apellido', lastName),
-                          _sheetRow('DNI', dni, keyboard: TextInputType.number),
-                          _sheetRow('Parentesco', relationship,
-                              hint: 'Ej: Hijo/a, Cónyuge, Hermano/a'),
-                          _sheetRow('Teléfono *', phone,
-                              required: true, keyboard: TextInputType.phone),
-                          _sheetRow('Email', email, keyboard: TextInputType.emailAddress),
-                          _sheetRow('Dirección', address),
+                          SheetFieldRow(label: 'Nombre *', controller: name, required: true),
+                          SheetFieldRow(label: 'Apellido', controller: lastName),
+                          SheetFieldRow(label: 'DNI', controller: dni, keyboard: TextInputType.number),
+                          SheetFieldRow(label: 'Parentesco', controller: relationship, hint: 'Ej: Hijo/a, Cónyuge, Hermano/a'),
+                          SheetFieldRow(label: 'Teléfono *', controller: phone, required: true, keyboard: TextInputType.phone),
+                          SheetFieldRow(label: 'Email', controller: email, keyboard: TextInputType.emailAddress),
+                          SheetFieldRow(label: 'Dirección', controller: address),
                           const SizedBox(height: 12),
                           // Toggle responsable principal
                           Container(
@@ -843,6 +858,20 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
       'general':    'General',
     };
     return labels[type] ?? type;
+  }
+
+  Future<void> _deleteDiagnosis(PatientDiagnosis d) async {
+    final confirm = await _confirmDialog(
+      '¿Eliminar diagnóstico?', 'Se eliminará permanentemente.');
+    if (confirm == true) {
+      try {
+        await _diagnosisRepo.delete(d.id);
+        await _loadClinicalData();
+        if (mounted) _showSnack('Diagnóstico eliminado', success: true);
+      } catch (e) {
+        if (mounted) _showSnack(e.toString().replaceFirst('Exception: ', ''));
+      }
+    }
   }
 
   Future<bool?> _confirmDialog(String title, String message) {
@@ -1170,7 +1199,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
                    
-                      _sheetRow('Diagnóstico *', diagCtrl, required: true),
+                      SheetFieldRow(label: 'Diagnóstico *', controller: diagCtrl, required: true),
 
                      
                       Text('Código CIE-10',
@@ -1340,7 +1369,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                       const SizedBox(height: 16),
 
                      
-                      _sheetRow('Notas / Observaciones', notesCtrl),
+                      SheetFieldRow(label: 'Notas / Observaciones', controller: notesCtrl),
 
                       
                       Padding(
@@ -1367,16 +1396,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                               initialDate: DateTime.now(),
                               firstDate: DateTime(1900),
                               lastDate: DateTime(2100),
-                              builder: (ctx, child) => Theme(
-                                data: ThemeData.dark().copyWith(
-                                  colorScheme: const ColorScheme.dark(
-                                      primary: Color(0xFF4A1240),
-                                      surface: Color(0xFF2A0825)),
-                                  dialogTheme: const DialogThemeData(
-                                      backgroundColor: Color(0xFF2A0825)),
-                                ),
-                                child: child!,
-                              ),
+                              builder: (ctx, child) => _datePickerTheme(child!),
                             );
                             if (picked != null) {
                               setModalState(() {
@@ -1533,14 +1553,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         initialDate: DateTime.now(),
         firstDate: DateTime(2000),
         lastDate: DateTime(2100),
-        builder: (ctx, child) => Theme(
-          data: ThemeData.dark().copyWith(
-            colorScheme: const ColorScheme.dark(
-                primary: Color(0xFF4A1240), surface: Color(0xFF2A0825)),
-            dialogTheme: const DialogThemeData(backgroundColor: Color(0xFF2A0825)),
-          ),
-          child: child!,
-        ),
+        builder: (ctx, child) => _datePickerTheme(child!),
       );
       if (picked != null) {
         set(() {
@@ -1616,10 +1629,9 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                               'end_date': _displayToIso(endCtrl.text),
                             'is_active': true,
                           });
+                          await _loadClinicalData();
                           if (mounted) {
-                            searchFocus.dispose();
                             Navigator.pop(ctx);
-                            await _loadClinicalData();
                             _showSnack('Prescripción registrada', success: true);
                           }
                         } catch (e) {
@@ -1782,10 +1794,10 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                       ],
 
                       const SizedBox(height: 16),
-                      _sheetRow('Dosis *', doseCtrl, required: true, hint: 'Ej: 500mg'),
-                      _sheetRow('Frecuencia *', freqCtrl, required: true, hint: 'Ej: Cada 8 horas'),
-                      _sheetRow('Vía de administración', routeCtrl, hint: 'Ej: Oral, Subcutánea'),
-                      _sheetRow('Instrucciones', instructionsCtrl, hint: 'Indicaciones adicionales'),
+                      SheetFieldRow(label: 'Dosis *', controller: doseCtrl, required: true, hint: 'Ej: 500mg'),
+                      SheetFieldRow(label: 'Frecuencia *', controller: freqCtrl, required: true, hint: 'Ej: Cada 8 horas'),
+                      SheetFieldRow(label: 'Vía de administración', controller: routeCtrl, hint: 'Ej: Oral, Subcutánea'),
+                      SheetFieldRow(label: 'Instrucciones', controller: instructionsCtrl, hint: 'Indicaciones adicionales'),
                       Padding(
                         padding: const EdgeInsets.only(bottom: 14),
                         child: TextFormField(
@@ -1919,10 +1931,8 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                 child: Form(
                   key: formKey,
                   child: Column(children: [
-                    _sheetRow('Tipo de estudio *', typeCtrl,
-                        required: true, hint: 'Ej: Radiografía, Análisis de sangre'),
-                    _sheetRow('Conclusión / Resultado', conclusionCtrl,
-                        hint: 'Resultado o hallazgos del estudio'),
+                    SheetFieldRow(label: 'Tipo de estudio *', controller: typeCtrl, required: true, hint: 'Ej: Radiografía, Análisis de sangre'),
+                    SheetFieldRow(label: 'Conclusión / Resultado', controller: conclusionCtrl, hint: 'Resultado o hallazgos del estudio'),
                     Padding(
                       padding: const EdgeInsets.only(bottom: 14),
                       child: TextFormField(
@@ -1945,14 +1955,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                             initialDate: DateTime.now(),
                             firstDate: DateTime(1900),
                             lastDate: DateTime(2100),
-                            builder: (ctx, child) => Theme(
-                              data: ThemeData.dark().copyWith(
-                                colorScheme: const ColorScheme.dark(
-                                    primary: Color(0xFF4A1240), surface: Color(0xFF2A0825)),
-                                dialogTheme: const DialogThemeData(backgroundColor: Color(0xFF2A0825)),
-                              ),
-                              child: child!,
-                            ),
+                            builder: (ctx, child) => _datePickerTheme(child!),
                           );
                           if (picked != null) {
                             setModalState(() {
@@ -1997,27 +2000,44 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
     ));
   }
 
+
+  /// Tema oscuro consistente para todos los DatePicker de la app.
+  Widget _datePickerTheme(Widget child) {
+    return Theme(
+      data: ThemeData.dark().copyWith(
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF9C5BB5),
+          onPrimary: Colors.white,
+          surface: Color(0xFF2A0825),
+          onSurface: Colors.white,
+        ),
+        dialogTheme: const DialogThemeData(
+          backgroundColor: Color(0xFF2A0825),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.white,
+            textStyle: const TextStyle(
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+      ),
+      child: child,
+    );
+  }
   Future<void> _pickDate(TextEditingController ctrl) async {
-    DateTime initial = DateTime.now();
-    if (ctrl.text.isNotEmpty) {
-      try { initial = DateTime.parse(ctrl.text); } catch (_) {}
-    }
+    final initial = AppDateUtils.parseOrNow(AppDateUtils.toIso(ctrl.text));
     final picked = await showDatePicker(
       context: context,
       initialDate: initial,
       firstDate: DateTime(1900),
       lastDate: DateTime(2100),
-      builder: (ctx, child) => Theme(
-        data: ThemeData.dark().copyWith(
-          colorScheme: const ColorScheme.dark(
-            primary: Color(0xFF4A1240), surface: Color(0xFF2A0825)),
-          dialogTheme: const DialogThemeData(backgroundColor: Color(0xFF2A0825)),
-        ),
-        child: child!,
-      ),
+      builder: (ctx, child) => _datePickerTheme(child!),
     );
     if (picked != null && mounted) {
-      setState(() => ctrl.text = picked.toIso8601String().split('T').first);
+      setState(() => ctrl.text = AppDateUtils.fromDateTime(picked));
     }
   }
 
@@ -2049,9 +2069,65 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                     child: TabBarView(
                       controller: _tabController,
                       children: [
-                        _buildPersonalTab(),
-                        _buildContactTab(),
-                        _buildClinicalTab(),
+                        PersonalTab(
+                        patient: _patient,
+                        isEditing: _isEditing,
+                        firstName: _firstName,
+                        lastName: _lastName,
+                        dni: _dni,
+                        birthDate: _birthDate,
+                        admissionDate: _admissionDate,
+                        emergencyPhone: _emergencyPhone,
+                        notes: _notes,
+                        gender: _gender,
+                        bloodType: _bloodType,
+                        mobilityStatus: _mobilityStatus,
+                        dependencyLevel: _dependencyLevel,
+                        status: _status,
+                        genders: _genders,
+                        bloodTypes: _bloodTypes,
+                        mobilityOptions: _mobilityOptions,
+                        dependencyOptions: _dependencyOptions,
+                        statusOptions: _statusOptions,
+                        onGenderChanged: (v) => setState(() => _gender = v!),
+                        onBloodTypeChanged: (v) => setState(() => _bloodType = v ?? ''),
+                        onMobilityChanged: (v) => setState(() => _mobilityStatus = v!),
+                        onDependencyChanged: (v) => setState(() => _dependencyLevel = v!),
+                        onStatusChanged: (v) => setState(() => _status = v!),
+                        onPickBirthDate: () => _pickDate(_birthDate),
+                        onPickAdmissionDate: () => _pickDate(_admissionDate),
+                        currentAssignment: _currentAssignment,
+                        onAssignBed: _showAssignBedSheet,
+                        onReleaseBed: _releaseBed,
+                        onDelete: _delete,
+                      ),
+                        ContactTab(
+                        contacts: _contacts,
+                        onAdd: () => _showAddContactSheet(),
+                        onEdit: (c) => _showAddContactSheet(editing: c),
+                        onSetPrimary: _setPrimaryContact,
+                        onDelete: _deleteContact,
+                      ),
+                        ClinicalTab(
+                        loading: _loadingClinical,
+                        diagnoses: _diagnoses,
+                        evolutions: _evolutions,
+                        prescriptions: _prescriptions,
+                        studies: _studies,
+                        allergies: _allergies,
+                        filterSpecialty: _filterSpecialty,
+                        onFilterChanged: (v) => setState(() => _filterSpecialty = v),
+                        onAddDiagnosis: () => _showAddDiagnosisSheet(),
+                        onEditDiagnosis: (d) => _showAddDiagnosisSheet(editing: d),
+                        onDeleteDiagnosis: _deleteDiagnosis,
+                        onAddEvolution: _showAddEvolutionSheet,
+                        onAddPrescription: _showAddPrescriptionSheet,
+                        onAddStudy: _showAddStudySheet,
+                        onAddAllergy: _showAddAllergySheet,
+                        onEditAllergy: _showEditAllergySheet,
+                        onDeleteAllergy: _removeAllergy,
+                        onReload: _loadClinicalData,
+                      ),
                       ],
                     ),
                   ),
@@ -2179,7 +2255,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                     size: 11, color: Colors.white.withValues(alpha: 0.30),
                   ),
                   const SizedBox(width: 3),
-                  Text(_labelFor(_patient.mobilityStatus),
+                  Text(PatientLabels.of(_patient.mobilityStatus),
                       style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.30))),
                 ],
               ),
@@ -2230,1312 +2306,6 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
 
  
 
-  Widget _buildPersonalTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
-          child: Column(
-            children: [
-              
-              _buildBedCard(),
-              const SizedBox(height: 14),
-              _buildSection('Identificación', [
-                _fieldRow('Nombre',            _firstName,    required: true),
-                _fieldRow('Apellido',          _lastName,     required: true),
-                _fieldRow('DNI',               _dni,          required: true, keyboardType: TextInputType.number),
-                _fieldRow('Fecha de nacimiento',_birthDate,   isDate: true),
-                _dropdownRow('Género',         _gender, _genders,        (v) => setState(() => _gender = v!)),
-                _dropdownRow('Grupo sanguíneo',_bloodType, _bloodTypes,  (v) => setState(() => _bloodType = v ?? ''), isLast: true),
-              ]),
-              const SizedBox(height: 14),
-              _buildSection('Internación', [
-                _fieldRow('Fecha de ingreso',  _admissionDate, isDate: true),
-                _dropdownRow('Movilidad',      _mobilityStatus, _mobilityOptions, (v) => setState(() => _mobilityStatus = v!)),
-                _dropdownRow('Dependencia',    _dependencyLevel, _dependencyOptions, (v) => setState(() => _dependencyLevel = v!)),
-                _dropdownRow('Estado',         _status, _statusOptions, (v) => setState(() => _status = v!), isLast: true),
-              ]),
-              const SizedBox(height: 14),
-              _buildSection('Contacto y notas', [
-                _fieldRow('Tel. de emergencia', _emergencyPhone, keyboardType: TextInputType.phone),
-                _fieldRow('Notas', _notes, maxLines: 3, isLast: true),
-              ]),
-              if (!_isEditing) ...[
-                const SizedBox(height: 28),
-                SizedBox(
-                  width: double.infinity, height: 46,
-                  child: OutlinedButton.icon(
-                    onPressed: _delete,
-                    icon: Icon(Icons.delete_outline_rounded,
-                        size: 18, color: AppColors.error.withValues(alpha: 0.70)),
-                    label: Text('Eliminar paciente',
-                        style: TextStyle(color: AppColors.error.withValues(alpha: 0.70), fontSize: 13)),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: AppColors.error.withValues(alpha: 0.25)),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 24),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
- 
-
-  Widget _buildContactTab() {
-    return Stack(
-      children: [
-        _contacts.isEmpty
-            ? Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.family_restroom_outlined,
-                        color: Colors.white.withValues(alpha: 0.12), size: 48),
-                    const SizedBox(height: 12),
-                    Text('Sin familiares registrados',
-                        style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.35), fontSize: 13)),
-                    const SizedBox(height: 6),
-                    Text('Tocá + para agregar un familiar a cargo',
-                        style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.20), fontSize: 11)),
-                  ],
-                ),
-              )
-            : ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-                itemCount: _contacts.length,
-                itemBuilder: (ctx, i) => _contactCard(_contacts[i]),
-              ),
-        
-        Positioned(
-          right: 16, bottom: 20,
-          child: FloatingActionButton(
-            heroTag: 'fab_contact',
-            backgroundColor: const Color(0xFF4A1240),
-            foregroundColor: Colors.white,
-            elevation: 4,
-            onPressed: () => _showAddContactSheet(),
-            child: const Icon(Icons.person_add_outlined, size: 22),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _contactCard(PatientContact c) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: c.isPrimary
-              ? Colors.amber.withValues(alpha: 0.30)
-              : Colors.white.withValues(alpha: 0.09),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 12, 8),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: AppColors.primaryDark.withValues(alpha: 0.70),
-                  child: Text(c.name.isNotEmpty ? c.name[0].toUpperCase() : '?',
-                      style: const TextStyle(color: Colors.white, fontSize: 13)),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(c.fullName,
-                              style: const TextStyle(color: Colors.white, fontSize: 14,
-                                  fontWeight: FontWeight.w400)),
-                          if (c.isPrimary) ...[
-                            const SizedBox(width: 6),
-                            Icon(Icons.star_rounded, size: 13,
-                                color: Colors.amber.withValues(alpha: 0.70)),
-                          ],
-                        ],
-                      ),
-                      if (c.relationship != null)
-                        Text(c.relationship!,
-                            style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.40), fontSize: 11)),
-                    ],
-                  ),
-                ),
-                
-                PopupMenuButton<String>(
-                  icon: Icon(Icons.more_vert,
-                      size: 18, color: Colors.white.withValues(alpha: 0.35)),
-                  color: const Color(0xFF3A0B32),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
-                  ),
-                  onSelected: (action) {
-                    if (action == 'edit')    _showAddContactSheet(editing: c);
-                    if (action == 'primary') _setPrimaryContact(c);
-                    if (action == 'delete')  _deleteContact(c);
-                  },
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                      value: 'edit',
-                      child: Row(children: [
-                        Icon(Icons.edit_outlined, size: 15,
-                            color: Colors.white.withValues(alpha: 0.60)),
-                        const SizedBox(width: 10),
-                        Text('Editar', style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.80), fontSize: 13)),
-                      ]),
-                    ),
-                    if (!c.isPrimary)
-                      PopupMenuItem(
-                        value: 'primary',
-                        child: Row(children: [
-                          Icon(Icons.star_border_rounded, size: 15,
-                              color: Colors.amber.withValues(alpha: 0.60)),
-                          const SizedBox(width: 10),
-                          Text('Marcar como responsable',
-                              style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.80), fontSize: 13)),
-                        ]),
-                      ),
-                    PopupMenuItem(
-                      value: 'delete',
-                      child: Row(children: [
-                        Icon(Icons.delete_outline, size: 15,
-                            color: AppColors.error.withValues(alpha: 0.70)),
-                        const SizedBox(width: 10),
-                        Text('Eliminar', style: TextStyle(
-                            color: AppColors.error.withValues(alpha: 0.80), fontSize: 13)),
-                      ]),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          Container(height: 1, color: Colors.white.withValues(alpha: 0.05)),
-          _infoRow('Teléfono', c.phone),
-          if (c.dni != null)    _infoRow('DNI',       c.dni!),
-          if (c.email != null)  _infoRow('Email',     c.email!),
-          if (c.address != null) _infoRow('Dirección', c.address!, isLast: true),
-          if (c.address == null && c.email == null && c.dni == null)
-            _infoRow('', '', isLast: true),
-        ],
-      ),
-    );
-  }
-
- 
-
-  Widget _buildClinicalTab() {
-    if (_loadingClinical) {
-      return const Center(
-          child: CircularProgressIndicator(color: Colors.white38, strokeWidth: 1.5));
-    }
-    return DefaultTabController(
-      length: 5,
-      child: Column(
-        children: [
-          Container(
-            color: Colors.white.withValues(alpha: 0.02),
-            child: TabBar(
-              isScrollable: true,
-              tabAlignment: TabAlignment.start,
-              indicatorColor: const Color(0xFF9C4E8A),
-              indicatorWeight: 1.5,
-              labelColor: Colors.white.withValues(alpha: 0.85),
-              unselectedLabelColor: Colors.white.withValues(alpha: 0.30),
-              labelStyle: const TextStyle(fontSize: 11, letterSpacing: 0.3),
-              tabs: [
-                _clinicalTabItem(Icons.biotech_outlined,      'Diagnósticos', _diagnoses.length),
-                _clinicalTabItem(Icons.history_edu_outlined,  'Evoluciones',  _evolutions.length),
-                _clinicalTabItem(Icons.medication_outlined,   'Medicamentos', _prescriptions.length),
-                _clinicalTabItem(Icons.science_outlined,      'Estudios',     _studies.length),
-                _clinicalTabItem(Icons.warning_amber_outlined,'Alergias',     _allergies.length),
-              ],
-            ),
-          ),
-          Expanded(
-            child: TabBarView(
-              children: [
-                _buildDiagnosisTab(),
-                _buildEvolutionTab(),
-                _buildPrescriptionTab(),
-                _buildStudiesTab(),
-                _buildAllergyTab(),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Tab _clinicalTabItem(IconData icon, String label, int count) {
-    return Tab(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14),
-          const SizedBox(width: 5),
-          Text(label),
-          if (count > 0) ...[
-            const SizedBox(width: 5),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(count.toString(),
-                  style: const TextStyle(fontSize: 9, color: Colors.white60)),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDiagnosisTab() {
-    return Stack(
-      children: [
-        _diagnoses.isEmpty
-            ? _emptyState('Sin diagnósticos registrados', Icons.biotech_outlined,
-                subtitle: 'Tocá + para agregar un diagnóstico')
-            : ListView.builder(
-                padding: const EdgeInsets.fromLTRB(14, 8, 14, 80),
-                itemCount: _diagnoses.length,
-                itemBuilder: (ctx, i) => _diagnosisCard(_diagnoses[i]),
-              ),
-        Positioned(
-          right: 16, bottom: 20,
-          child: FloatingActionButton(
-            heroTag: 'fab_diagnosis',
-            backgroundColor: const Color(0xFF4A1240),
-            foregroundColor: Colors.white,
-            elevation: 4,
-            onPressed: _showAddDiagnosisSheet,
-            child: const Icon(Icons.add, size: 24),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _diagnosisCard(PatientDiagnosis d) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 8, 10),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Container(
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                color: const Color(0xFF7C4DFF).withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.biotech_outlined, size: 17,
-                  color: Color(0xFF9C6FFF)),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(d.diagnosis,
-                    style: const TextStyle(fontSize: 13, color: Colors.white,
-                        fontWeight: FontWeight.w400)),
-                if (d.cie10Code != null) ...[
-                  const SizedBox(height: 5),
-                  Row(children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF7C4DFF).withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                      child: Text(d.cie10Code!,
-                          style: const TextStyle(
-                              color: Color(0xFFBB99FF), fontSize: 11,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                    if (d.cie10Label != null) ...[
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(d.cie10Label!,
-                            style: TextStyle(fontSize: 11,
-                                color: Colors.white.withValues(alpha: 0.45)),
-                            overflow: TextOverflow.ellipsis),
-                      ),
-                    ],
-                  ]),
-                ],
-              ]),
-            ),
-            PopupMenuButton<String>(
-              icon: Icon(Icons.more_vert, size: 17,
-                  color: Colors.white.withValues(alpha: 0.30)),
-              color: const Color(0xFF3A0B32),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
-              ),
-              onSelected: (action) async {
-                if (action == 'edit') {
-                  _showAddDiagnosisSheet(editing: d);
-                } else if (action == 'delete') {
-                  final confirm = await _confirmDialog(
-                    'Eliminar diagnóstico?',
-                    'Se eliminará permanentemente.',
-                  );
-                  if (confirm == true) {
-                    try {
-                      await _diagnosisRepo.delete(d.id);
-                      await _loadClinicalData();
-                      _showSnack('Diagnóstico eliminado', success: true);
-                    } catch (e) {
-                      _showSnack(e.toString().replaceFirst('Exception: ', ''));
-                    }
-                  }
-                }
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(
-                  value: 'edit',
-                  child: Row(children: [
-                    Icon(Icons.edit_outlined, size: 15,
-                        color: Colors.white.withValues(alpha: 0.60)),
-                    const SizedBox(width: 10),
-                    Text('Editar', style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.80), fontSize: 13)),
-                  ]),
-                ),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: Row(children: [
-                    Icon(Icons.delete_outline, size: 15,
-                        color: AppColors.error.withValues(alpha: 0.70)),
-                    const SizedBox(width: 10),
-                    Text('Eliminar', style: TextStyle(
-                        color: AppColors.error.withValues(alpha: 0.80), fontSize: 13)),
-                  ]),
-                ),
-              ],
-            ),
-          ]),
-        ),
-        if (d.notes != null && d.notes!.isNotEmpty) ...[
-          Container(height: 1, color: Colors.white.withValues(alpha: 0.05)),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
-            child: Text(d.notes!,
-                style: TextStyle(fontSize: 12,
-                    color: Colors.white.withValues(alpha: 0.55), height: 1.5)),
-          ),
-        ],
-        if (d.diagnosedAt != null || d.professional != null) ...[
-          Container(height: 1, color: Colors.white.withValues(alpha: 0.05)),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 7, 14, 8),
-            child: Row(children: [
-              if (d.diagnosedAt != null) ...[
-                Icon(Icons.calendar_today_outlined, size: 11,
-                    color: Colors.white.withValues(alpha: 0.25)),
-                const SizedBox(width: 4),
-                Text(_formatDate(d.diagnosedAt),
-                    style: TextStyle(fontSize: 11,
-                        color: Colors.white.withValues(alpha: 0.35))),
-              ],
-              const Spacer(),
-              if (d.professional != null) ...[
-                Icon(Icons.person_outline, size: 11,
-                    color: Colors.white.withValues(alpha: 0.25)),
-                const SizedBox(width: 4),
-                Text(
-                  '${d.professional!.name} ${d.professional!.lastName ?? ""}',
-                  style: TextStyle(fontSize: 11,
-                      color: Colors.white.withValues(alpha: 0.35))),
-              ],
-            ]),
-          ),
-        ],
-      ]),
-    );
-  }
-
-
-  Widget _buildEvolutionTab() {
-    final filtered = _evolutions.where((e) {
-      if (_filterSpecialty != null && _filterSpecialty!.isNotEmpty) {
-        final specs = e.professional?.specialties.map((s) => s.name) ?? [];
-        if (!specs.contains(_filterSpecialty)) return false;
-      }
-      return true;
-    }).toList();
-
-    final allSpecialties = <String>{};
-    for (final ev in _evolutions) {
-      for (final sp in ev.professional?.specialties ?? []) {
-        allSpecialties.add(sp.name);
-      }
-    }
-
-    return Stack(
-      children: [
-        Column(
-          children: [
-            if (allSpecialties.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      _filterChip('Todas', null),
-                      ...allSpecialties.map((s) => _filterChip(s, s)),
-                    ],
-                  ),
-                ),
-              ),
-            Expanded(
-              child: filtered.isEmpty
-                  ? _emptyState('Sin evoluciones registradas', Icons.history_edu_outlined,
-                      subtitle: 'Tocá + para registrar una nueva evolución')
-                  : ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 80),
-                      itemCount: filtered.length,
-                      itemBuilder: (ctx, i) {
-                        final ev = filtered[i];
-                        final specs = ev.professional?.specialties
-                                .map((s) => s.name).join(', ') ?? '';
-                        return _evolutionCard(ev, specs);
-                      },
-                    ),
-            ),
-          ],
-        ),
-        // FAB — agregar evolución
-        Positioned(
-          right: 16, bottom: 20,
-          child: FloatingActionButton(
-            heroTag: 'fab_evolution',
-            backgroundColor: const Color(0xFF4A1240),
-            foregroundColor: Colors.white,
-            elevation: 4,
-            onPressed: _showAddEvolutionSheet,
-            child: const Icon(Icons.add, size: 24),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _filterChip(String label, String? value) {
-    final isSelected = _filterSpecialty == value;
-    return GestureDetector(
-      onTap: () => setState(() => _filterSpecialty = value),
-      child: Container(
-        margin: const EdgeInsets.only(right: 8, bottom: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? AppColors.primaryDark.withValues(alpha: 0.85)
-              : Colors.white.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isSelected
-                ? Colors.white.withValues(alpha: 0.20)
-                : Colors.white.withValues(alpha: 0.10),
-          ),
-        ),
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 11,
-                color: Colors.white.withValues(alpha: isSelected ? 0.90 : 0.45))),
-      ),
-    );
-  }
-
-  Widget _evolutionCard(PatientEvolution ev, String specialties) {
-    final date = _formatDate(ev.recordedAt);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-            child: Row(
-              children: [
-                // Tipo de evolución
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryDark.withValues(alpha: 0.40),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(_evolutionTypeLabel(ev.type),
-                      style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.70),
-                          fontWeight: FontWeight.w500)),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1565C0).withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFF1565C0).withValues(alpha: 0.30)),
-                  ),
-                  child: Text(date,
-                      style: const TextStyle(fontSize: 10, color: Color(0xFF64B5F6),
-                          fontWeight: FontWeight.w500)),
-                ),
-                const Spacer(),
-                if (specialties.isNotEmpty)
-                  Text(specialties,
-                      style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.30))),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-            child: Text(ev.evolution,
-                style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.80),
-                    height: 1.5)),
-          ),
-          if (ev.professional != null) ...[
-            Container(height: 1, color: Colors.white.withValues(alpha: 0.05)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 8, 14, 9),
-              child: Row(
-                children: [
-                  Icon(Icons.person_outline, size: 12, color: Colors.white.withValues(alpha: 0.28)),
-                  const SizedBox(width: 5),
-                  Text('${ev.professional!.name} ${ev.professional!.lastName ?? ''}',
-                      style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.40))),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPrescriptionTab() {
-    return Stack(
-      children: [
-        _prescriptions.isEmpty
-            ? _emptyState('Sin medicamentos recetados', Icons.medication_outlined,
-                subtitle: 'Tocá + para agregar una prescripción')
-            : ListView.builder(
-                padding: const EdgeInsets.fromLTRB(14, 8, 14, 80),
-                itemCount: _prescriptions.length,
-                itemBuilder: (ctx, i) => _prescriptionCard(_prescriptions[i]),
-              ),
-        Positioned(
-          right: 16, bottom: 20,
-          child: FloatingActionButton(
-            heroTag: 'fab_prescription',
-            backgroundColor: const Color(0xFF4A1240),
-            foregroundColor: Colors.white,
-            elevation: 4,
-            onPressed: _showAddPrescriptionSheet,
-            child: const Icon(Icons.add, size: 24),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _prescriptionCard(MedicalPrescription p) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(7),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(Icons.medication_outlined, size: 18,
-                      color: Colors.green.withValues(alpha: 0.70)),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(p.medication?.name ?? 'Medicamento',
-                          style: const TextStyle(fontSize: 14, color: Colors.white,
-                              fontWeight: FontWeight.w400)),
-                      if (p.medication?.presentation != null)
-                        Text(p.medication!.presentation!,
-                            style: TextStyle(fontSize: 11,
-                                color: Colors.white.withValues(alpha: 0.35))),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Container(height: 1, color: Colors.white.withValues(alpha: 0.05)),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                _pillBadge(Icons.scale_outlined,    'Dosis: ${p.dose}'),
-                const SizedBox(width: 8),
-                _pillBadge(Icons.schedule_outlined, p.frequency),
-              ],
-            ),
-            if (p.route != null) ...[
-              const SizedBox(height: 6),
-              _pillBadge(Icons.route_outlined, 'Vía: ${p.route}'),
-            ],
-            if (p.professional != null) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.person_outline, size: 11, color: Colors.white.withValues(alpha: 0.25)),
-                  const SizedBox(width: 4),
-                  Text('${p.professional!.name} ${p.professional!.lastName ?? ''}',
-                      style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.35))),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _pillBadge(IconData icon, String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 11, color: Colors.white.withValues(alpha: 0.45)),
-          const SizedBox(width: 4),
-          Text(text, style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.65))),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStudiesTab() {
-    return Stack(
-      children: [
-        _studies.isEmpty
-            ? _emptyState('Sin estudios registrados', Icons.science_outlined,
-                subtitle: 'Tocá + para agregar un estudio')
-            : ListView.builder(
-                padding: const EdgeInsets.fromLTRB(14, 8, 14, 80),
-                itemCount: _studies.length,
-                itemBuilder: (ctx, i) {
-                  final s = _studies[i];
-                  return _clinicalCard(
-                    icon: Icons.science_outlined,
-                    accentColor: const Color(0xFFFF6F00),
-                    title: s.studyType,
-                    subtitle: s.conclusion,
-                    date: s.performedAt,
-                    professional: s.professional != null
-                        ? '\${s.professional!.name} \${s.professional!.lastName ?? ''}' : null,
-                  );
-                },
-              ),
-        Positioned(
-          right: 16, bottom: 20,
-          child: FloatingActionButton(
-            heroTag: 'fab_study',
-            backgroundColor: const Color(0xFF4A1240),
-            foregroundColor: Colors.white,
-            elevation: 4,
-            onPressed: _showAddStudySheet,
-            child: const Icon(Icons.add, size: 24),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _clinicalCard({
-    required IconData icon,
-    required Color accentColor,
-    required String title,
-    String? subtitle,
-    String? date,
-    String? professional,
-  }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(7),
-                  decoration: BoxDecoration(
-                    color: accentColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(icon, size: 17, color: accentColor.withValues(alpha: 0.75)),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(title,
-                      style: const TextStyle(fontSize: 13, color: Colors.white,
-                          fontWeight: FontWeight.w400)),
-                ),
-                if (date != null)
-                  Text(_formatDate(date),
-                      style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.35))),
-              ],
-            ),
-            if (subtitle != null && subtitle.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(subtitle, style: TextStyle(fontSize: 12,
-                  color: Colors.white.withValues(alpha: 0.60), height: 1.5)),
-            ],
-            if (professional != null) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.person_outline, size: 11, color: Colors.white.withValues(alpha: 0.25)),
-                  const SizedBox(width: 4),
-                  Text(professional,
-                      style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.38))),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _emptyState(String msg, IconData icon, {String? subtitle}) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: Colors.white.withValues(alpha: 0.10), size: 44),
-          const SizedBox(height: 10),
-          Text(msg, style: TextStyle(color: Colors.white.withValues(alpha: 0.30), fontSize: 13)),
-          if (subtitle != null) ...[
-            const SizedBox(height: 4),
-            Text(subtitle, style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.18), fontSize: 11)),
-          ],
-          const SizedBox(height: 8),
-          TextButton.icon(
-            onPressed: _loadClinicalData,
-            icon: Icon(Icons.refresh, size: 14, color: Colors.white.withValues(alpha: 0.35)),
-            label: Text('Recargar',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 12)),
-          ),
-        ],
-      ),
-    );
-  }
-
- 
-
-  Widget _buildBedCard() {
-    final assigned = _currentAssignment != null;
-    final bed = _currentAssignment?.bed;
-    final room = bed?.room;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: assigned
-            ? Colors.green.withValues(alpha: 0.07)
-            : Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: assigned
-              ? Colors.green.withValues(alpha: 0.22)
-              : Colors.white.withValues(alpha: 0.09),
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(9),
-              decoration: BoxDecoration(
-                color: (assigned ? Colors.green : Colors.white)
-                    .withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(
-                assigned ? Icons.bed_rounded : Icons.bed_outlined,
-                size: 22,
-                color: (assigned ? Colors.green : Colors.white)
-                    .withValues(alpha: assigned ? 0.75 : 0.30),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: assigned
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Cama ${bed!.bedNumber}',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w400)),
-                        if (room != null)
-                          Text(
-                            'Hab. ${room.number}'
-                            '${room.floor != null ? ' · Piso ${room.floor}' : ''}',
-                            style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.45),
-                                fontSize: 11),
-                          ),
-                      ],
-                    )
-                  : Text('Sin cama asignada',
-                      style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.35),
-                          fontSize: 14)),
-            ),
-            assigned
-                ? OutlinedButton.icon(
-                    onPressed: _isEditing ? null : _releaseBed,
-                    icon: Icon(Icons.logout, size: 14,
-                        color: AppColors.error.withValues(alpha: 0.65)),
-                    label: Text('Dar de alta',
-                        style: TextStyle(
-                            color: AppColors.error.withValues(alpha: 0.70),
-                            fontSize: 12)),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: AppColors.error.withValues(alpha: 0.25)),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                    ),
-                  )
-                : ElevatedButton.icon(
-                    onPressed: _isEditing ? null : _showAssignBedSheet,
-                    icon: const Icon(Icons.add, size: 14),
-                    label: const Text('Asignar', style: TextStyle(fontSize: 12)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4A1240),
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                    ),
-                  ),
-          ],
-        ),
-      ),
-    );
-  }
-
- 
-
-  Widget _buildSection(String title, List<Widget> rows) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 13, 16, 9),
-            child: Text(title.toUpperCase(),
-                style: TextStyle(fontSize: 10, letterSpacing: 2,
-                    color: Colors.white.withValues(alpha: 0.30), fontWeight: FontWeight.w500)),
-          ),
-          Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
-          ...rows,
-        ],
-      ),
-    );
-  }
-
-  Widget _fieldRow(String label, TextEditingController ctrl, {
-    bool required = false,
-    bool isDate = false,
-    bool isLast = false,
-    TextInputType? keyboardType,
-    int maxLines = 1,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        border: isLast
-            ? null
-            : Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
-      ),
-      child: _isEditing
-          ? TextFormField(
-              controller: ctrl,
-              keyboardType: isDate ? TextInputType.datetime : keyboardType,
-              maxLines: maxLines,
-              style: const TextStyle(color: Colors.white, fontSize: 14),
-              readOnly: isDate,
-              onTap: isDate ? () => _pickDate(ctrl) : null,
-              validator: required
-                  ? (v) => (v == null || v.trim().isEmpty) ? 'Campo requerido' : null
-                  : null,
-              decoration: InputDecoration(
-                labelText: label,
-                labelStyle: TextStyle(color: Colors.white.withValues(alpha: 0.40), fontSize: 12),
-                suffixIcon: isDate
-                    ? Icon(Icons.calendar_today_outlined, size: 15,
-                        color: Colors.white.withValues(alpha: 0.30)) : null,
-                enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.18))),
-                focusedBorder: const UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white54)),
-                errorBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: AppColors.error.withValues(alpha: 0.65))),
-                errorStyle: TextStyle(
-                    color: AppColors.error.withValues(alpha: 0.80), fontSize: 11),
-              ),
-            )
-          : Row(
-              children: [
-                SizedBox(width: 140,
-                    child: Text(label,
-                        style: TextStyle(fontSize: 12,
-                            color: Colors.white.withValues(alpha: 0.38)))),
-                Expanded(
-                  child: Text(ctrl.text.isEmpty ? '—' : ctrl.text,
-                      style: TextStyle(fontSize: 13,
-                          color: ctrl.text.isEmpty
-                              ? Colors.white.withValues(alpha: 0.18)
-                              : Colors.white.withValues(alpha: 0.80)),
-                      textAlign: TextAlign.end),
-                ),
-              ],
-            ),
-    );
-  }
-
-  Widget _dropdownRow(String label, String value, List<String> options,
-      ValueChanged<String?> onChanged, {bool isLast = false}) {
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 16, vertical: _isEditing ? 4 : 12),
-      decoration: BoxDecoration(
-        border: isLast
-            ? null
-            : Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
-      ),
-      child: _isEditing
-          ? DropdownButtonFormField<String>(
-              initialValue: value.isEmpty ? null : value,
-              dropdownColor: const Color(0xFF2A0825),
-              style: const TextStyle(color: Colors.white, fontSize: 14),
-              decoration: InputDecoration(
-                labelText: label,
-                labelStyle: TextStyle(color: Colors.white.withValues(alpha: 0.40), fontSize: 12),
-                enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.18))),
-                focusedBorder: const UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white54)),
-              ),
-              items: options.map((o) => DropdownMenuItem(
-                    value: o.isEmpty ? null : o,
-                    child: Text(o.isEmpty ? '—' : _labelFor(o),
-                        style: TextStyle(
-                            color: Colors.white.withValues(alpha: o.isEmpty ? 0.35 : 0.85),
-                            fontSize: 13)),
-                  )).toList(),
-              onChanged: onChanged,
-            )
-          : Row(
-              children: [
-                SizedBox(width: 140,
-                    child: Text(label,
-                        style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.38)))),
-                Expanded(
-                  child: Text(value.isEmpty ? '—' : _labelFor(value),
-                      style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.80)),
-                      textAlign: TextAlign.end),
-                ),
-              ],
-            ),
-    );
-  }
-
-
-  Widget _sheetRow(String label, TextEditingController ctrl, {
-    bool required = false,
-    TextInputType? keyboard,
-    String? hint,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: TextFormField(
-        controller: ctrl,
-        keyboardType: keyboard,
-        style: const TextStyle(color: Colors.white, fontSize: 14),
-        validator: required
-            ? (v) => (v == null || v.trim().isEmpty) ? 'Campo requerido' : null
-            : null,
-        decoration: InputDecoration(
-          labelText: label,
-          hintText: hint,
-          labelStyle: TextStyle(color: Colors.white.withValues(alpha: 0.40), fontSize: 12),
-          hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.20), fontSize: 12),
-          enabledBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.18))),
-          focusedBorder: const UnderlineInputBorder(
-              borderSide: BorderSide(color: Colors.white54)),
-          errorBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: AppColors.error.withValues(alpha: 0.65))),
-          errorStyle: TextStyle(color: AppColors.error.withValues(alpha: 0.80), fontSize: 11),
-        ),
-      ),
-    );
-  }
-
-  Widget _infoRow(String label, String value, {bool isLast = false}) {
-    if (label.isEmpty) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        border: isLast
-            ? null
-            : Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.04))),
-      ),
-      child: Row(
-        children: [
-          SizedBox(width: 110,
-              child: Text(label,
-                  style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.35)))),
-          Expanded(
-            child: Text(value,
-                style: TextStyle(fontSize: 13,
-                    color: value == '—'
-                        ? Colors.white.withValues(alpha: 0.20)
-                        : Colors.white.withValues(alpha: 0.75)),
-                textAlign: TextAlign.end),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatDate(String? dateStr) {
-    if (dateStr == null || dateStr.isEmpty) return '—';
-    try {
-      final d = DateTime.parse(dateStr);
-      return '${d.day.toString().padLeft(2, '0')}/'
-          '${d.month.toString().padLeft(2, '0')}/${d.year}';
-    } catch (_) {
-      return dateStr;
-    }
-  }
-
-  String _labelFor(String o) {
-    const labels = {
-      'female':     'Femenino',
-      'male':       'Masculino',
-      'other':      'Otro',
-      'normal':     'Normal',
-      'reduced':    'Reducida',
-      'wheelchair': 'Silla de ruedas',
-      'bedridden':  'Postrado',
-      'low':        'Dependencia baja',
-      'medium':     'Dependencia media',
-      'high':       'Dependencia alta',
-      'active':     'Activo',
-      'inactive':   'Inactivo',
-      'deceased':   'Fallecido',
-    };
-    return labels[o] ?? o;
-  }
-
-  // ─── TAB ALERGIAS ───────────────────────────────────────────────────────────
-
-  Widget _buildAllergyTab() {
-    return Stack(
-      children: [
-        _allergies.isEmpty
-            ? Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.check_circle_outline,
-                        size: 44, color: Colors.green.withValues(alpha: 0.25)),
-                    const SizedBox(height: 12),
-                    Text('Sin alergias registradas',
-                        style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.35),
-                            fontSize: 13)),
-                  ],
-                ),
-              )
-            : ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
-                itemCount: _allergies.length,
-                itemBuilder: (_, i) => _allergyCard(_allergies[i]),
-              ),
-
-        // FAB agregar
-        Positioned(
-          bottom: 16,
-          right: 16,
-          child: FloatingActionButton(
-            heroTag: 'fab_allergy',
-            mini: true,
-            backgroundColor: AppColors.primaryDark,
-            onPressed: _showAddAllergySheet,
-            child: const Icon(Icons.add, color: Colors.white, size: 20),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _allergyCard(Allergy allergy) {
-    final severityColor = _severityColor(allergy.severity);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: severityColor.withValues(alpha: 0.25)),
-      ),
-      child: ListTile(
-        dense: true,
-        leading: Container(
-          width: 36, height: 36,
-          decoration: BoxDecoration(
-            color: severityColor.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(Icons.warning_amber_outlined,
-              size: 18, color: severityColor.withValues(alpha: 0.80)),
-        ),
-        title: Text(allergy.name,
-            style: const TextStyle(color: Colors.white, fontSize: 13,
-                fontWeight: FontWeight.w400)),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 2),
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: severityColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(5),
-                  ),
-                  child: Text(allergy.severityLabel,
-                      style: TextStyle(fontSize: 10,
-                          color: severityColor.withValues(alpha: 0.90))),
-                ),
-              ],
-            ),
-            if (allergy.reaction != null && allergy.reaction!.isNotEmpty) ...[
-              const SizedBox(height: 3),
-              Text('Reacción: ${allergy.reaction}',
-                  style: TextStyle(fontSize: 11,
-                      color: Colors.white.withValues(alpha: 0.45))),
-            ],
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            InkWell(
-              onTap: () => _showEditAllergySheet(allergy),
-              borderRadius: BorderRadius.circular(6),
-              child: Padding(
-                padding: const EdgeInsets.all(6),
-                child: Icon(Icons.edit_outlined, size: 15,
-                    color: Colors.white.withValues(alpha: 0.35)),
-              ),
-            ),
-            InkWell(
-              onTap: () => _removeAllergy(allergy),
-              borderRadius: BorderRadius.circular(6),
-              child: Padding(
-                padding: const EdgeInsets.all(6),
-                child: Icon(Icons.delete_outline, size: 15,
-                    color: AppColors.error.withValues(alpha: 0.40)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Color _severityColor(String? severity) {
-    switch (severity) {
-      case 'severe':   return const Color(0xFFEF5350);
-      case 'moderate': return const Color(0xFFFF9800);
-      default:         return const Color(0xFF4CAF50);
-    }
-  }
-
-  // ── Agregar alergia ────────────────────────────────────────────────────────
 
   Future<void> _showAddAllergySheet() async {
     // Cargar catálogo existente
@@ -3565,7 +2335,6 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
       backgroundColor: Colors.transparent,
       builder: (_) => StatefulBuilder(
         builder: (ctx, setModal) {
-          // Si está en modo nueva alergia, muestra un formulario de creación
           final content = creatingNew
               ? _newAllergyForm(
                   nameCtrl:    newNameCtrl,
@@ -3579,13 +2348,13 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                     if (newNameCtrl.text.trim().isEmpty) return;
                     setModal(() => saving = true);
                     try {
-                      // 1. Crear la alergia en el catálogo
+                     
                       final created = await _allergyRepo.create({
                         'name': newNameCtrl.text.trim(),
                         if (newDescCtrl.text.trim().isNotEmpty)
                           'description': newDescCtrl.text.trim(),
                       });
-                      // 2. Asignarla al paciente
+                      
                       await _allergyRepo.assignToPatient(
                         _patient.id,
                         allergyId: created.id,
@@ -3658,8 +2427,6 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
       ),
     );
   }
-
-  // ── Formulario: seleccionar del catálogo ───────────────────────────────────
 
   Widget _selectAllergyForm({
     required List<Allergy> catalog,
@@ -3807,7 +2574,6 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         ),
         const SizedBox(height: 10),
 
-        // Severidad
         Text('Severidad',
             style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.40), fontSize: 11)),
@@ -3821,7 +2587,6 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         ]),
         const SizedBox(height: 10),
 
-        // Reacción
         TextField(
           controller: reactionCtrl,
           style: const TextStyle(color: Colors.white, fontSize: 13),
@@ -3859,8 +2624,6 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
       ],
     );
   }
-
-  // ── Formulario: crear nueva alergia en el catálogo ─────────────────────────
 
   Widget _newAllergyForm({
     required TextEditingController nameCtrl,
@@ -3902,7 +2665,6 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         ),
         const SizedBox(height: 14),
 
-        // Nombre (requerido)
         TextField(
           controller: nameCtrl,
           textCapitalization: TextCapitalization.sentences,
@@ -3919,7 +2681,6 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         ),
         const SizedBox(height: 8),
 
-        // Descripción (opcional)
         TextField(
           controller: descCtrl,
           style: const TextStyle(color: Colors.white, fontSize: 13),
@@ -3935,7 +2696,6 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         ),
         const SizedBox(height: 14),
 
-        // Severidad para este paciente
         Text('Severidad para este paciente',
             style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.40), fontSize: 11)),
@@ -3949,7 +2709,6 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         ]),
         const SizedBox(height: 10),
 
-        // Reacción
         TextField(
           controller: reactionCtrl,
           style: const TextStyle(color: Colors.white, fontSize: 13),
@@ -3988,7 +2747,6 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
     );
   }
 
-  // ── Editar alergia ─────────────────────────────────────────────────────────
 
   Future<void> _showEditAllergySheet(Allergy allergy) async {
     String severity = allergy.severity ?? 'moderate';
@@ -4109,7 +2867,6 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
     );
   }
 
-  // ── Eliminar alergia ───────────────────────────────────────────────────────
 
   Future<void> _removeAllergy(Allergy allergy) async {
     final ok = await _confirmDialog(

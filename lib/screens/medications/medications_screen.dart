@@ -7,7 +7,9 @@ import 'package:app_geriatrico/core/config.dart';
 
 class MedicationsScreen extends StatefulWidget {
   final String token;
-  const MedicationsScreen({super.key, required this.token});
+  final int institutionId;
+  final List<String> roles;
+  const MedicationsScreen({super.key, required this.token, required this.institutionId, this.roles = const []});
 
   @override
   State<MedicationsScreen> createState() => _MedicationsScreenState();
@@ -35,7 +37,7 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
   @override
   void initState() {
     super.initState();
-    _api  = ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token);
+    _api  = ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token, institutionId: widget.institutionId);
     _repo = MedicationRepository(_api);
     _load();
     _searchCtrl.addListener(_onSearch);
@@ -342,12 +344,12 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
       ]),
 
 
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: widget.roles.contains('admin') ? FloatingActionButton(
         backgroundColor: _accent,
         foregroundColor: Colors.white,
         onPressed: () => _showForm(),
         child: const Icon(Icons.add),
-      ),
+      ) : null,
     );
   }
 

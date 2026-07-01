@@ -6,10 +6,14 @@ import 'package:http/io_client.dart';
 class ApiService {
   final String baseUrl;
   final String? token;
+  final int? institutionId;
 
-  const ApiService({required this.baseUrl, this.token});
+  const ApiService({
+    required this.baseUrl,
+    this.token,
+    this.institutionId,
+  });
 
-  // Cliente HTTP que acepta certificados SSL con cadena incompleta
   http.Client get _client {
     final httpClient = HttpClient()
       ..badCertificateCallback =
@@ -24,6 +28,9 @@ class ApiService {
     };
     if (token != null) {
       headers['Authorization'] = 'Bearer $token';
+    }
+    if (institutionId != null) {
+      headers['X-Institution-ID'] = institutionId.toString();
     }
     return headers;
   }

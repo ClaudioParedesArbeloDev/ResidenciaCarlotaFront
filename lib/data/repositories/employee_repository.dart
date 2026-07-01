@@ -45,7 +45,7 @@ class EmployeeRepository {
   ) async {
     final response = await api.put('/employees/$id', {
       ...data,
-      'roles': roleIds,
+      if (roleIds.isNotEmpty) 'role_id': roleIds.first,
     });
     final body = jsonDecode(response.body);
     return Employee.fromJson(body['user']);

@@ -45,7 +45,7 @@ class Employee {
   }
 
   factory Employee.fromJson(Map<String, dynamic> json) => Employee(
-        id: json['id'] as int,
+        id: _parseInt(json['id']),
         name: (json['name'] as String?) ?? '',
         lastName: (json['last_name'] as String?) ?? '',
         dni: json['dni'] as String?,
@@ -58,14 +58,27 @@ class Employee {
         hireDate: json['hire_date'] as String?,
         avatar: json['avatar'] as String?,
         isActive: json['is_active'] == 1 || json['is_active'] == true,
-        roles: (json['roles'] as List<dynamic>? ?? [])
-            .map((r) => Role.fromJson(r as Map<String, dynamic>))
-            .toList(),
+        roles: _parseRoles(json),
         specialties: (json['specialties'] as List<dynamic>? ?? [])
             .map((s) => Specialty.fromJson(s as Map<String, dynamic>,),)
             .toList(),
       );
 
+
+  /// Maneja tanto 'role' (objeto singular de store/index) como 'roles' (array)
+  static List<Role> _parseRoles(Map<String, dynamic> json) {
+    // Array de roles
+    if (json['roles'] is List) {
+      return (json['roles'] as List)
+          .map((r) => Role.fromJson(r as Map<String, dynamic>))
+          .toList();
+    }
+    // Objeto singular (respuesta de store e index del back)
+    if (json['role'] is Map) {
+      return [Role.fromJson(json['role'] as Map<String, dynamic>)];
+    }
+    return [];
+  }
  Employee copyWith({
   String? name,
   String? lastName,
@@ -113,4 +126,10 @@ class Employee {
         'hire_date': hireDate,
         'is_active': isActive,
       };
+
+  static int _parseInt(dynamic v) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.parse(v.toString());
+  }
 }

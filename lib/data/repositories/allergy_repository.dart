@@ -54,8 +54,8 @@ class AllergyRepository {
     String? reaction,
   }) async {
     await api.put('/patients/$patientId/allergies/$allergyId', {
-      if (severity != null) 'severity': severity,
-      if (reaction != null) 'reaction': reaction,
+      'severity': ?severity,
+      'reaction': ?reaction,
     });
   }
 

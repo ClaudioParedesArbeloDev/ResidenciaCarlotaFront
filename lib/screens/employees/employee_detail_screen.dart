@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:app_geriatrico/core/app_colors.dart';
+import 'package:app_geriatrico/core/date_utils.dart';
 import 'package:app_geriatrico/core/config.dart';
 import 'package:app_geriatrico/data/models/employee_model.dart';
 import 'package:app_geriatrico/data/models/role_model.dart';
@@ -10,11 +11,13 @@ import 'package:app_geriatrico/services/api_services.dart';
 class EmployeeDetailScreen extends StatefulWidget {
   final Employee employee;
   final String token;
+  final int institutionId;
 
   const EmployeeDetailScreen({
     super.key,
     required this.employee,
     required this.token,
+    required this.institutionId,
   });
 
   @override
@@ -50,9 +53,8 @@ class _EmployeeDetailScreenState extends State<EmployeeDetailScreen> {
   @override
   void initState() {
     super.initState();
-    // FIX: EmployeeRepository ahora recibe ApiService
     _repo = EmployeeRepository(
-      ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token),
+      ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token, institutionId: widget.institutionId),
     );
     _emp = widget.employee;
     _initControllers();
@@ -69,8 +71,8 @@ class _EmployeeDetailScreenState extends State<EmployeeDetailScreen> {
     _address = TextEditingController(text: _emp.address ?? '');
     _employeeCode = TextEditingController(text: _emp.employeeCode ?? '');
     _licenseNumber = TextEditingController(text: _emp.licenseNumber ?? '');
-    _birthDate = TextEditingController(text: _emp.birthDate ?? '');
-    _hireDate = TextEditingController(text: _emp.hireDate ?? '');
+    _birthDate = TextEditingController(text: AppDateUtils.format(_emp.birthDate));
+    _hireDate = TextEditingController(text: AppDateUtils.format(_emp.hireDate));
     _isActive = _emp.isActive;
     _selectedRoleIds = _emp.roles.map((r) => r.id).toSet();
     _selectedSpecialtyIds = _emp.specialties.map((s) => s.id).toSet();
@@ -98,7 +100,6 @@ class _EmployeeDetailScreenState extends State<EmployeeDetailScreen> {
 
   Future<void> _loadAllSpecialties() async {
     try {
-      // FIX: usa _repo.getSpecialties() en lugar de Dio directo
       final list = await _repo.getSpecialties();
       if (mounted) setState(() => _allSpecialties = list);
     } catch (e) {
@@ -134,14 +135,12 @@ class _EmployeeDetailScreenState extends State<EmployeeDetailScreen> {
         'address': _address.text.trim().isEmpty ? null : _address.text.trim(),
         'employee_code': _employeeCode.text.trim().isEmpty ? null : _employeeCode.text.trim(),
         'license_number': _licenseNumber.text.trim().isEmpty ? null : _licenseNumber.text.trim(),
-        'birth_date': _birthDate.text.trim().isEmpty ? null : _birthDate.text.trim(),
-        'hire_date': _hireDate.text.trim().isEmpty ? null : _hireDate.text.trim(),
+        'birth_date': AppDateUtils.toIso(_birthDate.text),
+        'hire_date': AppDateUtils.toIso(_hireDate.text),
         'is_active': _isActive,
       };
 
       final updated = await _repo.update(_emp.id, data, _selectedRoleIds.toList());
-
-      // FIX: usa _repo.replaceSpecialties() en lugar de Dio directo
       try {
         await _repo.replaceSpecialties(_emp.id, _selectedSpecialtyIds.toList());
       } catch (e) {
@@ -224,34 +223,45 @@ class _EmployeeDetailScreenState extends State<EmployeeDetailScreen> {
     );
   }
 
+
+  /// Tema oscuro consistente para todos los DatePicker de la app.
+  Widget _datePickerTheme(Widget child) {
+    return Theme(
+      data: ThemeData.dark().copyWith(
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF9C5BB5),
+          onPrimary: Colors.white,
+          surface: Color(0xFF2A0825),
+          onSurface: Colors.white,
+        ),
+        dialogTheme: const DialogThemeData(
+          backgroundColor: Color(0xFF2A0825),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.white,
+            textStyle: const TextStyle(
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+      ),
+      child: child,
+    );
+  }
   Future<void> _pickDate(TextEditingController ctrl) async {
-    DateTime initial = DateTime.now();
-    if (ctrl.text.isNotEmpty) {
-      try {
-        initial = DateTime.parse(ctrl.text);
-      } catch (_) {}
-    }
+    final initial = AppDateUtils.parseOrNow(AppDateUtils.toIso(ctrl.text));
     final picked = await showDatePicker(
       context: context,
       initialDate: initial,
       firstDate: DateTime(1920),
       lastDate: DateTime(2100),
-      builder: (ctx, child) => Theme(
-        data: ThemeData.dark().copyWith(
-          colorScheme: const ColorScheme.dark(
-            primary: Color(0xFF4A1240),
-            surface: Color(0xFF2A0825),
-          ),
-          dialogTheme: const DialogThemeData(
-            backgroundColor: Color(0xFF2A0825),
-          ),
-        ),
-        child: child!,
-      ),
+      builder: (ctx, child) => _datePickerTheme(child!),
     );
     if (picked != null && mounted) {
       setState(() {
-        ctrl.text = picked.toIso8601String().split('T').first;
+        ctrl.text = AppDateUtils.fromDateTime(picked);
       });
     }
   }

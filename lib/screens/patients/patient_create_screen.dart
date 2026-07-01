@@ -5,11 +5,13 @@ import 'package:app_geriatrico/data/models/patient_model.dart';
 import 'package:app_geriatrico/data/models/bed_model.dart';
 import 'package:app_geriatrico/data/repositories/patient_repository.dart';
 import 'package:app_geriatrico/data/repositories/bed_repository.dart';
+import 'package:app_geriatrico/data/repositories/patient_bed_assignment_repository.dart';
 import 'package:app_geriatrico/services/api_services.dart';
 
 class CreatePatientScreen extends StatefulWidget {
   final String token;
-  const CreatePatientScreen({super.key, required this.token});
+  final int institutionId;
+  const CreatePatientScreen({super.key, required this.token, required this.institutionId});
 
   @override
   State<CreatePatientScreen> createState() => _CreatePatientScreenState();
@@ -18,6 +20,7 @@ class CreatePatientScreen extends StatefulWidget {
 class _CreatePatientScreenState extends State<CreatePatientScreen> {
   late final PatientRepository _repo;
   late final BedRepository _bedRepo;
+  late final PatientBedAssignmentRepository _bedAssignmentRepo;
 
   final _formKey = GlobalKey<FormState>();
   bool _saving = false;
@@ -67,9 +70,10 @@ class _CreatePatientScreenState extends State<CreatePatientScreen> {
   @override
   void initState() {
     super.initState();
-    final api = ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token);
+    final api = ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token, institutionId: widget.institutionId);
     _repo       = PatientRepository(api);
     _bedRepo    = BedRepository(api);
+    _bedAssignmentRepo = PatientBedAssignmentRepository(api);
     _loadBeds();
   }
 
@@ -88,13 +92,39 @@ class _CreatePatientScreenState extends State<CreatePatientScreen> {
       final all = await _bedRepo.getAll();
       setState(() => _availableBeds = all.where((b) => b.status == 'available').toList());
     } catch (_) {
-      // Si falla, simplemente no muestra camas
     } finally {
       if (mounted) setState(() => _loadingBeds = false);
     }
   }
 
  
+
+  /// Tema oscuro consistente para todos los DatePicker de la app.
+  Widget _datePickerTheme(Widget child) {
+    return Theme(
+      data: ThemeData.dark().copyWith(
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF9C5BB5),
+          onPrimary: Colors.white,
+          surface: Color(0xFF2A0825),
+          onSurface: Colors.white,
+        ),
+        dialogTheme: const DialogThemeData(
+          backgroundColor: Color(0xFF2A0825),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.white,
+            textStyle: const TextStyle(
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+      ),
+      child: child,
+    );
+  }
   Future<void> _pickDate(TextEditingController ctrl) async {
     DateTime initial = DateTime.now();
     if (ctrl.text.isNotEmpty) {
@@ -116,15 +146,7 @@ class _CreatePatientScreenState extends State<CreatePatientScreen> {
       initialDate: initial,
       firstDate: DateTime(1900),
       lastDate: DateTime(2100),
-      builder: (ctx, child) => Theme(
-        data: ThemeData.dark().copyWith(
-          colorScheme: const ColorScheme.dark(
-              primary: Color(0xFF4A1240), surface: Color(0xFF2A0825)),
-          dialogTheme:
-              const DialogThemeData(backgroundColor: Color(0xFF2A0825)),
-        ),
-        child: child!,
-      ),
+      builder: (ctx, child) => _datePickerTheme(child!),
     );
     if (picked != null && mounted) {
       setState(() {
@@ -139,7 +161,6 @@ class _CreatePatientScreenState extends State<CreatePatientScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
-      // 1. Crear paciente
       final patient = Patient(
         id:              0,
         firstName:       _firstName.text.trim(),
@@ -158,7 +179,10 @@ class _CreatePatientScreenState extends State<CreatePatientScreen> {
         contacts:        [],
       );
 
-      await _repo.createPatient(patient);
+      final createdPatient = await _repo.createPatient(patient);
+      if (_selectedBedId != null) {
+        await _bedAssignmentRepo.assign(createdPatient.id, _selectedBedId!);
+      }
 
       if (mounted) {
         _showSnack(
@@ -245,7 +269,7 @@ class _CreatePatientScreenState extends State<CreatePatientScreen> {
                                   (v) => setState(() => _dependencyLevel = v!)),
                               _dropdownRow('Estado', _status, _statusOptions,
                                   (v) => setState(() => _status = v!)),
-                              _bedDropdownRow(), // ← asignación de cama
+                              _bedDropdownRow(), 
                             ]),
                             const SizedBox(height: 14),
 

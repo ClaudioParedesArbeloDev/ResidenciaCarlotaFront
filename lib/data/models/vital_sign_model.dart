@@ -34,7 +34,6 @@ class VitalSign {
     this.registeredBy,
   });
 
-  
   String? get bloodPressure {
     if (bloodPressureSystolic != null && bloodPressureDiastolic != null) {
       return '$bloodPressureSystolic/$bloodPressureDiastolic';
@@ -44,20 +43,20 @@ class VitalSign {
 
   factory VitalSign.fromJson(Map<String, dynamic> json) {
     return VitalSign(
-      id: json['id'],
-      patientId: json['patient_id'],
-      bloodPressureSystolic:  json['blood_pressure_systolic'],
-      bloodPressureDiastolic: json['blood_pressure_diastolic'],
-      heartRate:         json['heart_rate'],
-      temperature:       (json['temperature'] as num?)?.toDouble(),
-      oxygenSaturation:  (json['oxygen_saturation'] as num?)?.toDouble(),
-      bloodGlucose:      json['blood_glucose'],
-      weight:            (json['weight'] as num?)?.toDouble(),
-      respiratoryRate:   json['respiratory_rate'],
-      notes:             json['notes'],
-      recordedAt:        json['recorded_at'],
+      id:        _parseInt(json['id'])!,
+      patientId: _parseInt(json['patient_id'])!,
+      bloodPressureSystolic:  _parseInt(json['blood_pressure_systolic']),
+      bloodPressureDiastolic: _parseInt(json['blood_pressure_diastolic']),
+      heartRate:        _parseInt(json['heart_rate']),
+      temperature:      _parseDouble(json['temperature']),
+      oxygenSaturation: _parseDouble(json['oxygen_saturation']),
+      bloodGlucose:     _parseInt(json['blood_glucose']),
+      weight:           _parseDouble(json['weight']),
+      respiratoryRate:  _parseInt(json['respiratory_rate']),
+      notes:      json['notes'] as String?,
+      recordedAt: json['recorded_at'] as String?,
       registeredBy: json['registered_by'] != null
-          ? Employee.fromJson(json['registered_by'])
+          ? Employee.fromJson(json['registered_by'] as Map<String, dynamic>)
           : null,
     );
   }
@@ -77,4 +76,19 @@ class VitalSign {
         if (notes != null)            'notes': notes,
         if (recordedAt != null)       'recorded_at': recordedAt,
       };
+
+
+  static int? _parseInt(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse(v.toString());
+  }
+
+  static double? _parseDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is double) return v;
+    if (v is num) return v.toDouble();
+    return double.tryParse(v.toString());
+  }
 }

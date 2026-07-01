@@ -1,3 +1,13 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Android signing
+android/key.properties
+*.jks
+*.keystore
+
 # Miscellaneous
 *.class
 *.log

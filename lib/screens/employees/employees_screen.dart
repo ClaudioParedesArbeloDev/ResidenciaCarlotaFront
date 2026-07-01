@@ -4,13 +4,14 @@ import 'package:app_geriatrico/core/config.dart';
 import 'package:app_geriatrico/data/models/employee_model.dart';
 import 'package:app_geriatrico/data/repositories/employee_repository.dart';
 import 'package:app_geriatrico/services/api_services.dart';
-import 'package:app_geriatrico/screens/employee_detail_screen.dart';
-import 'package:app_geriatrico/screens/employee_create_screen.dart';
+import 'package:app_geriatrico/screens/employees/employee_detail_screen.dart';
+import 'package:app_geriatrico/screens/employees/employee_create_screen.dart';
 
 class EmployeesScreen extends StatefulWidget {
   final String token;
+  final int institutionId;
 
-  const EmployeesScreen({super.key, required this.token});
+  const EmployeesScreen({super.key, required this.token, required this.institutionId});
 
   @override
   State<EmployeesScreen> createState() => _EmployeesScreenState();
@@ -27,9 +28,8 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
   @override
   void initState() {
     super.initState();
-    // FIX: EmployeeRepository ahora recibe ApiService, no el token directo
     _repo = EmployeeRepository(
-      ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token),
+      ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token, institutionId: widget.institutionId),
     );
     _load();
   }
@@ -78,6 +78,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
         builder: (_) => EmployeeDetailScreen(
           employee: emp,
           token: widget.token,
+          institutionId: widget.institutionId,
         ),
       ),
     );
@@ -88,7 +89,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
     final created = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => CreateEmployeeScreen(token: widget.token),
+        builder: (_) => CreateEmployeeScreen(token: widget.token, institutionId: widget.institutionId),
       ),
     );
     if (created == true) _load();

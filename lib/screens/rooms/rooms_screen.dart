@@ -7,7 +7,8 @@ import 'package:app_geriatrico/services/api_services.dart';
 
 class RoomsScreen extends StatefulWidget {
   final String token;
-  const RoomsScreen({super.key, required this.token});
+  final int institutionId;
+  const RoomsScreen({super.key, required this.token, required this.institutionId});
 
   @override
   State<RoomsScreen> createState() => _RoomsScreenState();
@@ -25,7 +26,7 @@ class _RoomsScreenState extends State<RoomsScreen> {
   @override
   void initState() {
     super.initState();
-    _api  = ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token);
+    _api  = ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token, institutionId: widget.institutionId);
     _repo = RoomRepository(_api);
     _load();
   }
@@ -387,7 +388,6 @@ class _RoomsScreenState extends State<RoomsScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               child: Row(
                 children: [
-                  // Círculo de ocupación
                   Stack(
                     alignment: Alignment.center,
                     children: [
@@ -429,7 +429,8 @@ class _RoomsScreenState extends State<RoomsScreen> {
                                 ),
                                 child: Text('Piso ${room.floor}',
                                     style: TextStyle(fontSize: 10,
-                                        color: Colors.white.withValues(alpha: 0.50))),
+                                        color: Colors.white.withValues(alpha: 0.50))
+                                      ),
                               ),
                             ],
                             const SizedBox(width: 6),

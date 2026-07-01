@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:app_geriatrico/core/date_utils.dart';
 import 'package:app_geriatrico/core/app_colors.dart';
 import 'package:app_geriatrico/core/config.dart';
 import 'package:app_geriatrico/data/models/role_model.dart';
@@ -8,8 +9,9 @@ import 'package:app_geriatrico/services/api_services.dart';
 
 class CreateEmployeeScreen extends StatefulWidget {
   final String token;
+  final int institutionId;
 
-  const CreateEmployeeScreen({super.key, required this.token});
+  const CreateEmployeeScreen({super.key, required this.token, required this.institutionId});
 
   @override
   State<CreateEmployeeScreen> createState() => _CreateEmployeeScreenState();
@@ -25,13 +27,13 @@ class _CreateEmployeeScreenState extends State<CreateEmployeeScreen> {
  
   List<Role> _allRoles = [];
   final Set<int> _selectedRoleIds = {};
-  bool _loadingRoles = true;      // ← estado de carga separado
+  bool _loadingRoles = true;     
   String? _rolesError;
 
   
   List<Specialty> _allSpecialties = [];
   final Set<int> _selectedSpecialtyIds = {};
-  bool _loadingSpecialties = true; // ← estado de carga separado
+  bool _loadingSpecialties = true; 
   String? _specialtiesError;
 
   final _name          = TextEditingController();
@@ -51,7 +53,7 @@ class _CreateEmployeeScreenState extends State<CreateEmployeeScreen> {
   void initState() {
     super.initState();
     _repo = EmployeeRepository(
-      ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token),
+      ApiService(baseUrl: ApiConfig.baseUrl, token: widget.token, institutionId: widget.institutionId),
     );
     _loadRoles();
     _loadSpecialties();
@@ -107,6 +109,33 @@ class _CreateEmployeeScreenState extends State<CreateEmployeeScreen> {
 
  
 
+
+  /// Tema oscuro consistente para todos los DatePicker de la app.
+  Widget _datePickerTheme(Widget child) {
+    return Theme(
+      data: ThemeData.dark().copyWith(
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF9C5BB5),
+          onPrimary: Colors.white,
+          surface: Color(0xFF2A0825),
+          onSurface: Colors.white,
+        ),
+        dialogTheme: const DialogThemeData(
+          backgroundColor: Color(0xFF2A0825),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.white,
+            textStyle: const TextStyle(
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+      ),
+      child: child,
+    );
+  }
   Future<void> _pickDate(TextEditingController ctrl) async {
     DateTime initial = DateTime.now();
     if (ctrl.text.isNotEmpty) {
@@ -117,19 +146,10 @@ class _CreateEmployeeScreenState extends State<CreateEmployeeScreen> {
       initialDate: initial,
       firstDate: DateTime(1920),
       lastDate: DateTime(2100),
-      builder: (ctx, child) => Theme(
-        data: ThemeData.dark().copyWith(
-          colorScheme: const ColorScheme.dark(
-            primary: Color(0xFF4A1240),
-            surface: Color(0xFF2A0825),
-          ),
-          dialogTheme: const DialogThemeData(backgroundColor: Color(0xFF2A0825)),
-        ),
-        child: child!,
-      ),
+      builder: (ctx, child) => _datePickerTheme(child!),
     );
     if (picked != null && mounted) {
-      setState(() => ctrl.text = picked.toIso8601String().split('T').first);
+      setState(() => ctrl.text = AppDateUtils.fromDateTime(picked));
     }
   }
 
@@ -137,6 +157,11 @@ class _CreateEmployeeScreenState extends State<CreateEmployeeScreen> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    // Validar que se seleccionó un rol
+    if (_selectedRoleIds.isEmpty) {
+      setState(() => _rolesError = 'Seleccioná al menos un rol');
+      return;
+    }
     setState(() => _saving = true);
 
     try {
@@ -148,12 +173,12 @@ class _CreateEmployeeScreenState extends State<CreateEmployeeScreen> {
         'dni':            _dni.text.trim().isEmpty ? null : _dni.text.trim(),
         'phone':          _phone.text.trim().isEmpty ? null : _phone.text.trim(),
         'address':        _address.text.trim().isEmpty ? null : _address.text.trim(),
-        'birth_date':     _birthDate.text.isEmpty ? null : _birthDate.text,
+        'birth_date':     AppDateUtils.toIso(_birthDate.text),
         'employee_code':  _employeeCode.text.trim().isEmpty ? null : _employeeCode.text.trim(),
         'license_number': _licenseNumber.text.trim().isEmpty ? null : _licenseNumber.text.trim(),
-        'hire_date':      _hireDate.text.isEmpty ? null : _hireDate.text,
+        'hire_date':      AppDateUtils.toIso(_hireDate.text),
         'is_active':      _isActive,
-        'roles':          _selectedRoleIds.toList(),
+        'role_id':        _selectedRoleIds.isNotEmpty ? _selectedRoleIds.first : null,
       };
 
       final created = await _repo.create(data);
