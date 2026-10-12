@@ -96,6 +96,3 @@ The API URL lives in `lib/core/config.dart`.
 <p align="center">
   Hecho por / Built by <a href="https://github.com/ClaudioParedesArbeloDev"><b>Claudio Paredes Arbelo</b></a> · <a href="https://www.claudioparedes.site">Code & Lens Solutions</a>
 </p>
-# app_geriatrico
-
-A new Flutter project.
